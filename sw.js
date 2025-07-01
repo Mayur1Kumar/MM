@@ -3,20 +3,26 @@ function BroadcastDownloadingUpdate(version){PostBroadcastMessage({"type":"downl
 function WriteLazyLoadListToStorage(lazyLoadList){if(typeof localforage==="undefined")return Promise.resolve();else return localforage.setItem(LAZYLOAD_KEYNAME,lazyLoadList)}function ReadLazyLoadListFromStorage(){if(typeof localforage==="undefined")return Promise.resolve([]);else return localforage.getItem(LAZYLOAD_KEYNAME)}function GetCacheBaseName(){return CACHE_NAME_PREFIX+"-"+self.registration.scope}function GetCacheVersionName(version){return GetCacheBaseName()+"-v"+version}
 async function GetAvailableCacheNames(){const cacheNames=await caches.keys();const cacheBaseName=GetCacheBaseName();return cacheNames.filter(n=>n.startsWith(cacheBaseName))}async function IsUpdatePending(){const availableCacheNames=await GetAvailableCacheNames();return availableCacheNames.length>=2}
 async function GetMainPageUrl(){const allClients=await clients.matchAll({includeUncontrolled:true,type:"window"});for(const c of allClients){let url=c.url;if(url.startsWith(self.registration.scope))url=url.substring(self.registration.scope.length);if(url&&url!=="/"){if(url.startsWith("?"))url="/"+url;return url}}return""}
-
-function fetchWithBypass(request, bypassCache) {
-    return null;
-    // if (typeof request === "string") request = new Request(request);
-    // if (bypassCache) return fetch(request.url, {
-    //     headers: request.headers,
-    //     mode: request.mode,
-    //     credentials: request.credentials,
-    //     redirect: request.redirect,
-    //     cache: "no-store"
-    // });
-    // else return fetch(request)
+async function CreateCacheFromFileList(cacheName, fileList, bypassCache) {
+async function CreateCacheFromFileList(cacheName, fileList, bypassCache) {
+    const responses = await Promise.all(fileList.map(url=>fetchWithBypass(url, bypassCache)));
+    let allOk = true;
+    for (const response of responses)
+        if (!response.ok) {
+            allOk = false;
+            // console.error(CONSOLE_PREFIX + "Error fetching '" + response.url + "' (" + response.status + " " + response.statusText + ")")
+        }
+    if (!allOk)
+        throw new Error("not all resources were fetched successfully");
+    const cache = await caches.open(cacheName);
+    try {
+        return await Promise.all(responses.map((response,i)=>cache.put(fileList[i], response)))
+    } catch (err) {
+        console.error(CONSOLE_PREFIX + "Error writing cache entries: ", err);
+        caches.delete(cacheName);
+        throw err;
+    }
 }
-
 async function CreateCacheFromFileList(cacheName,fileList,bypassCache){const responses=await Promise.all(fileList.map(url=>fetchWithBypass(url,bypassCache)));let allOk=true;for(const response of responses)if(!response.ok){allOk=false;console.error(CONSOLE_PREFIX+"Error fetching '"+response.url+"' ("+response.status+" "+response.statusText+")")}if(!allOk)throw new Error("not all resources were fetched successfully");const cache=await caches.open(cacheName);try{return await Promise.all(responses.map((response,
 i)=>cache.put(fileList[i],response)))}catch(err){console.error(CONSOLE_PREFIX+"Error writing cache entries: ",err);caches.delete(cacheName);throw err;}}
 async function UpdateCheck(isFirst){try{const response=await fetchWithBypass(OFFLINE_DATA_FILE,true);if(!response.ok)throw new Error(OFFLINE_DATA_FILE+" responded with "+response.status+" "+response.statusText);const data=await response.json();const version=data.version;const fileList=data.fileList;const lazyLoadList=data.lazyLoad;const currentCacheName=GetCacheVersionName(version);const cacheExists=await caches.has(currentCacheName);if(cacheExists){const isUpdatePending=await IsUpdatePending();if(isUpdatePending){console.log(CONSOLE_PREFIX+
